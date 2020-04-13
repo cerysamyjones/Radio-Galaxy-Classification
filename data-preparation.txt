@@ -1,0 +1,95 @@
+import pandas as pd
+import numpy as np
+from astropy import stats
+from scipy.ndimage import rotate
+
+fr1_image_path = r'../data/VLASS/VLASSFR1s/'
+fr1_names_path = r'VLASSsmallfr1names.csv'
+fr1_names = pd.read_csv(fr1_names_path,header=None).iloc[0,:]
+
+fr2_image_path = r'../data/VLASS/VLASSFR2s/'
+fr2_names_path = r'VLASSsmallfr2names.csv'
+fr2_names = pd.read_csv(fr2_names_path,header=None).iloc[0,:]
+
+# sigma clip, then seperate validation, then augment, then seperate test/train
+
+def get_clipped_learning_validation(image_names,image_path, sigma,val_percentage):
+    '''
+    Put FITS data from desired folder into a 3D array
+    sigma = how many sigmas from the median background value to sigma clip the data to
+    '''
+    n = len(image_names)
+    data = np.empty(shape=(n,150,150))
+    for i in range(n):
+        d = np.load('{}{}'.format(image_path,image_names[i].replace("\'", "")))
+        d[np.isnan(d)] = 0
+        _,median,std = stats.sigma_clipped_stats(d, sigma=sigma)
+        d[d<median+sigma*std] = median+sigma*std
+        d = (d-np.min(d))/(np.max(d)-np.min(d))
+        data[i,:,:] = d
+    data = np.random.permutation(data)
+    upper = int(n*val_percentage)
+    return data[:upper],data[upper:]
+
+fr1_learning, fr1_validation = get_clipped_learning_validation(fr1_names,fr1_image_path,3,0.6)
+fr2_learning, fr2_validation = get_clipped_learning_validation(fr2_names,fr2_image_path,3,0.6)
+
+print (len(fr1_learning))
+print (len(fr2_learning))
+
+label_one = np.full(len(fr1_validation),0)
+label_two = np.full(len(fr2_validation),1)
+validation_labels = np.concatenate((label_one,label_two))
+validation = np.concatenate((fr1_validation,fr2_validation))
+rand_ind = np.random.permutation(range(len(validation)))
+validation = validation[rand_ind]
+validation_labels = validation_labels[rand_ind]
+np.save('validation.npy',validation)
+np.save('validation_labels.npy',validation_labels)
+
+def augment_data(data,size,xpix,ypix):
+    '''
+    Augment the data (3D array of images) by flipping and rotating the images.
+    Size = upper bound on the final number of images 
+    (actual_size can be much less depending on size/data_size multiples)
+    '''
+    rotations = size//len(data) # rotations per image
+    angles = np.linspace(0, 360, rotations)
+    act_size = rotations*len(data)
+    training_set = np.empty((act_size, xpix, ypix))
+    for i in range(len(data)):
+        for j in range(len(angles)):
+            if j % 2 == 0: training_set[i*len(angles)+j,:,:] = rotate(np.fliplr(data[i,:,:]), angles[j], reshape=False)
+            else: training_set[i*len(angles)+j,:,:] = rotate(data[i,:,:], angles[j], reshape=False)
+    return training_set
+
+fr1s = augment_data(fr1_learning,40000,150,150)
+fr2s = augment_data(fr2_learning,40000,150,150)
+
+def train_test(data,percentage):
+    '''
+    Combines data sets in one 3D array, with a different label for each data set.
+    Then randomly shuffles the data and splits into training and test sets.
+    data = list 3D arrays containing desired data sets
+    per = fraction of data to be in training set
+    returns: train and test data (each a tuple containing the data and corresponding labels)
+    '''
+    d = np.concatenate(data,axis=0)
+    n_images = len(d)
+    labels = np.empty(n_images)
+    i = 0
+    for n in range(len(data)):
+        labels[i:i+len(data[n])] = n
+        i = len(data[n])
+    rand_ind = np.random.permutation(range(n_images))
+    d, labels = d[rand_ind], labels[rand_ind]
+    n_train = np.int(np.round(n_images*percentage))
+    train = (d[:n_train], labels[:n_train])
+    test = (d[n_train:], labels[n_train:])
+    return train, test
+
+train, test = train_test((fr1s,fr2s), 0.8)
+np.save('trainingdata.npy',train[0])
+np.save('traininglabels.npy',train[1])
+np.save('testdata.npy',test[0])
+np.save('testlabels.npy',test[1])
