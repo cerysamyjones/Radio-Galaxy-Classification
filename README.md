@@ -32,4 +32,4 @@ It isn't very easy to plot graphs on BlueBear because I had to access it through
 
 11. **TGSS web scraping.py** <br> Webscraping to download sources from the TGSS website.
 
-12. **Resize.py** <br> Program used to resize VLASS/FIRST/TGSS images where necessary.
+12. **Resize.py** <br> Program used to resize VLASS/FIRST/TGSS images where necessary. The function in the program could easily be included as part of the data preparation, but because it is difficult to debug things when running them on bluebear, it was easier to work in stages and keep each part separate. 
